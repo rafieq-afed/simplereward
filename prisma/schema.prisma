@@ -1,0 +1,200 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MERCHANT
+}
+
+enum EventType {
+  EARN
+  REDEEM
+}
+
+/** How progress + reward are framed for a campaign. */
+enum CampaignType {
+  STAMP
+  B1F1
+  BUNDLE
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  name         String
+  role         Role         @default(MERCHANT)
+  merchantId   String?
+  merchant     Merchant?    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  events       StampEvent[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([merchantId])
+}
+
+model Merchant {
+  id             String         @id @default(cuid())
+  name           String
+  slug           String         @unique
+  welcomeNote    String?        @db.VarChar(255)
+  brandColor     String?        @db.VarChar(7)
+  logoUrl        String?        @db.VarChar(500)
+  /** classic | bold | ticket | soft */
+  cardTheme      String         @default("classic") @db.VarChar(20)
+  /** syne | bricolage | fraunces | space-grotesk | dm-sans */
+  fontFamily     String         @default("syne") @db.VarChar(32)
+  instagramUrl   String?        @db.VarChar(500)
+  facebookUrl    String?        @db.VarChar(500)
+  tiktokUrl      String?        @db.VarChar(500)
+  whatsappUrl    String?        @db.VarChar(500)
+  onboardedAt     DateTime?
+  requireJoinOtp  Boolean          @default(true)
+  /** Feature flags map — see shared/features.ts */
+  features        Json             @default("{}")
+  /** Quoted monthly price (MYR) from selected features */
+  quotedPrice     Int              @default(0)
+  users           User[]
+  staff           Staff[]
+  customers       Customer[]
+  campaigns       Campaign[]
+  otpChallenges   OtpChallenge[]
+  upgradeRequests UpgradeRequest[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model UpgradeRequest {
+  id          String   @id @default(cuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  message     String?  @db.VarChar(500)
+  desiredTier String?  @db.VarChar(20)
+  status      String   @default("PENDING") @db.VarChar(20)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([merchantId])
+  @@index([status])
+}
+
+model Campaign {
+  id             String             @id @default(cuid())
+  merchantId     String
+  merchant       Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  name           String
+  type           CampaignType       @default(STAMP)
+  goal           Int                @default(10)
+  rewardLabel    String             @default("Free item")
+  welcomeNote    String?            @db.VarChar(255)
+  brandColor     String?            @db.VarChar(7)
+  rewardImageUrl String?            @db.VarChar(500)
+  active         Boolean            @default(true)
+  sortOrder      Int                @default(0)
+  /** When set to today's calendar day, progress counts double for this campaign. */
+  doubleOn       DateTime?
+  enrollments    CustomerCampaign[]
+  events         StampEvent[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([merchantId])
+  @@index([merchantId, active])
+}
+
+model Staff {
+  id         String       @id @default(cuid())
+  merchantId String
+  merchant   Merchant     @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  name       String
+  pinHash    String
+  active     Boolean      @default(true)
+  events     StampEvent[]
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([merchantId])
+}
+
+model Customer {
+  id                String             @id @default(cuid())
+  merchantId        String
+  merchant          Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  phone             String             @db.VarChar(32)
+  name              String
+  cardCode          String?            @db.VarChar(8)
+  showCode          String?            @db.VarChar(4)
+  showCodeExpiresAt DateTime?
+  birthdayMd        String?            @db.VarChar(5)
+  birthdayBonusYear Int?
+  lastRemindedAt    DateTime?
+  lastBlastAt       DateTime?
+  enrollments       CustomerCampaign[]
+  events            StampEvent[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@unique([merchantId, phone])
+  @@unique([merchantId, cardCode])
+  @@index([merchantId])
+  @@index([merchantId, showCode])
+}
+
+/** Per-customer progress on one campaign. */
+model CustomerCampaign {
+  id             String     @id @default(cuid())
+  customerId     String
+  customer       Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  campaignId     String
+  campaign       Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  progress       Int        @default(0)
+  totalEarned    Int        @default(0)
+  totalRedeemed  Int        @default(0)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@unique([customerId, campaignId])
+  @@index([campaignId])
+  @@index([customerId])
+}
+
+model OtpChallenge {
+  id         String   @id @default(cuid())
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  phone      String   @db.VarChar(32)
+  name       String
+  code       String   @db.VarChar(6)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@unique([merchantId, phone])
+  @@index([merchantId])
+}
+
+model StampEvent {
+  id          String    @id @default(cuid())
+  customerId  String
+  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  campaignId  String?
+  campaign    Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  type        EventType
+  amount      Int       @default(1)
+  note        String?   @db.VarChar(255)
+  createdById String?
+  createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  staffId     String?
+  staff       Staff?    @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+
+  @@index([customerId])
+  @@index([campaignId])
+  @@index([createdAt])
+  @@index([staffId])
+}
